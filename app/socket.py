@@ -1,5 +1,3 @@
-from flask_socketio import SocketIO
-
 def socketio_events(app):
     @app.socketio.on('seat_lock')
     def handle_seat_lock(data):
