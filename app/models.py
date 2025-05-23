@@ -4,10 +4,21 @@ from .extensions import db
 class Movie(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
+    actor = db.Column(db.String(200))
     start_date = db.Column(db.DateTime, default=datetime.utcnow)
     end_date = db.Column(db.DateTime)
     genres = db.Column(db.String(200))
-    showtimes = db.relationship('Showtime', backref='movie', lazy=True)
+    show_times = db.relationship('Showtime', backref='movie', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'actor': self.actor,
+            'start_date': self.start_date.isoformat() if self.start_date else None,
+            'end_date': self.end_date.isoformat() if self.end_date else None,
+            'genres': self.genres
+        }
 
 class Showtime(db.Model):
     id = db.Column(db.Integer, primary_key=True)

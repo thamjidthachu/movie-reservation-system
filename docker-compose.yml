@@ -6,11 +6,7 @@ services:
     ports:
       - "5000:5000"
     environment:
-      - FLASK_APP=run.py
-      - FLASK_ENV=development
-      - DATABASE_URL=postgresql://postgres:password@db:5432/movies
-      - REDIS_URL=redis://redis:6379/0
-      - STRIPE_SECRET_KEY=your_stripe_secret_key
+      - .env
     depends_on:
       - db
       - redis
@@ -18,9 +14,7 @@ services:
   db:
     image: postgres:13
     environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: movies
+     - .env-db
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
