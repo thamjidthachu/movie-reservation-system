@@ -129,9 +129,9 @@ def get_seating_map(showtime_id):
     })
 
 
-@movie.route('/lock_seats', methods=['POST'])
+@movie.route('/checkout', methods=['POST'])
 @jwt_required()
-def lock_seats():
+def booking_checkout():
     """
     Request JSON:
     {
@@ -145,42 +145,62 @@ def lock_seats():
     if not seat_ids:
         return jsonify({"error": "seat_ids are required"}), 400
 
-    now =  datetime.utcnow()
+    now = datetime.utcnow()
     lock_until = now + current_app.config['LOCK_DURATION']
 
     try:
-        # Lock seats only if they are currently available or expired locked
+        # Lock seats only if available or expired lock
         seats = (
             Seat.query
             .filter(Seat.id.in_(seat_ids))
-            .with_for_update()  # lock rows for update to avoid race conditions
+            .with_for_update()
             .all()
         )
 
-        # Check seat availability & lock status
         for seat in seats:
             if seat.status == 'booked':
                 return jsonify({"error": f"Seat {seat.id} already booked"}), 409
-
             if seat.status == 'locked' and seat.locked_until and seat.locked_until > now and seat.locked_by != user_id:
                 return jsonify({"error": f"Seat {seat.id} is currently locked by another user"}), 409
 
-        # Lock the seats for this user
+        # Lock the seats
         for seat in seats:
             seat.status = 'locked'
             seat.locked_by = user_id
             seat.locked_until = lock_until
             db.session.add(seat)
+
+        # Stripe Setup
+        stripe.api_key = current_app.config['STRIPE_SECRET_KEY']
+
+        # Create Stripe Checkout Session
+        session = stripe.checkout.Session.create(
+            payment_method_types=['card'],
+            line_items=[{
+                'price_data': {
+                    'currency': current_app.config['CURRENCY'],
+                    'product_data': {
+                        'name': f'{len(seat_ids)} Seat(s) Reservation',
+                    },
+                    'unit_amount': current_app.config['SEAT_PRICE'],
+                },
+                'quantity': len(seat_ids),
+            }],
+            mode='payment',
+            success_url="https://aqaryaid.com/en",
+            cancel_url = "https://www.facebook.com",
+        )
+
         db.session.commit()
 
-        return jsonify({"message": f"Seats locked for user {user_id} until {lock_until.isoformat()}"}), 200
+        return jsonify({'checkout_url': session.url}), 200
 
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
+
 @movie.route('/confirm_booking', methods=['POST'])
-@jwt_required()
 def confirm_booking():
     """
     Request JSON:
@@ -294,7 +314,7 @@ def unlock_seats():
             db.session.add(seat)
 
         db.session.commit()
-        return jsonify({"message": "Seats unlocked successfully"}), 200
+        return jsonify({"message": "Seats released successfully"}), 200
 
     except Exception as e:
         db.session.rollback()
