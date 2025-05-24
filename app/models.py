@@ -17,6 +17,7 @@ class User(db.Model):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
 
+
 class Movie(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(100), nullable=False)
@@ -37,6 +38,7 @@ class Movie(db.Model):
             'end_date': self.end_date.isoformat() if self.end_date else None,
         }
 
+
 class Theater(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
@@ -44,6 +46,7 @@ class Theater(db.Model):
     seats_per_row = db.Column(db.Integer, nullable=False)
 
     show_times = db.relationship('Showtime', backref='theater', lazy=True)
+
 
 class Showtime(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -54,6 +57,22 @@ class Showtime(db.Model):
     seats = db.relationship('Seat', backref='showtime', lazy=True)
     bookings = db.relationship('Booking', backref='showtime', lazy=True)
 
+
+class Booking(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    showtime_id = db.Column(db.Integer, db.ForeignKey('showtime.id'), nullable=False)
+    status = db.Column(db.String(20), default='pending')  # pending, confirmed, cancelled
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    payment = db.relationship('Payment', backref='booking', uselist=False)
+    seats = db.relationship('Seat', backref='booking', lazy=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('showtime_id', 'user_id', name='unique_booking_per_user_per_showtime'),
+    )
+
+
 class Seat(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     row = db.Column(db.String(1), nullable=False)
@@ -62,8 +81,7 @@ class Seat(db.Model):
     locked_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     locked_until = db.Column(db.DateTime, nullable=True)
     showtime_id = db.Column(db.Integer, db.ForeignKey('showtime.id'), nullable=False)
-
-    bookings = db.relationship('Booking', backref='seat', lazy=True)
+    booking_id = db.Column(db.Integer, db.ForeignKey('booking.id'), nullable=True)
 
     __table_args__ = (
         db.UniqueConstraint('row', 'number', 'showtime_id', name='unique_seat_per_showtime'),
@@ -73,24 +91,10 @@ class Seat(db.Model):
         return self.locked_until and self.locked_until < datetime.utcnow()
 
 
-class Booking(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    seat_id = db.Column(db.Integer, db.ForeignKey('seat.id'), nullable=False)
-    showtime_id = db.Column(db.Integer, db.ForeignKey('showtime.id'), nullable=False)
-    status = db.Column(db.String(20), default='pending')  # pending, confirmed, cancelled
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-
-    payment = db.relationship('Payment', backref='booking', uselist=False)
-
-    __table_args__ = (
-        db.UniqueConstraint('seat_id', 'showtime_id', name='unique_booking_per_seat_showtime'),
-    )
-
-
 class Payment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     booking_id = db.Column(db.Integer, db.ForeignKey('booking.id'), nullable=False)
     amount = db.Column(db.Float, nullable=False)
+    checkout_id = db.Column(db.String(200))
     status = db.Column(db.String(20), default='initiated')  # success, failed, initiated
     timestamp = db.Column(db.DateTime, default=datetime.utcnow)
