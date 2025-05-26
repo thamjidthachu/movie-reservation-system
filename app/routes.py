@@ -5,9 +5,8 @@ from flask import Blueprint, jsonify, request
 from flask import current_app
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import and_
-from sqlalchemy.exc import IntegrityError
 
-from .extensions import db
+from .extensions import db, socketio, user_socket_map
 from .models import Movie, Showtime, Seat, Booking, Payment
 
 movie = Blueprint('main', __name__)
@@ -74,7 +73,6 @@ def handle_movies():
 
     return None
 
-
 @movie.route('/movie/<int:movie_id>/show-times', methods=['GET'])
 def get_show_times(movie_id):
     movie = Movie.query.get_or_404(movie_id)
@@ -97,7 +95,6 @@ def get_show_times(movie_id):
         'title': movie.title,
         'show_times': data
     })
-
 
 @movie.route('/showtime/<int:showtime_id>/seats', methods=['GET'])
 def get_seating_map(showtime_id):
@@ -128,7 +125,6 @@ def get_seating_map(showtime_id):
         'seating_map': seat_map
     })
 
-
 @movie.route('/checkout', methods=['POST'])
 @jwt_required()
 def booking_checkout():
@@ -138,6 +134,7 @@ def booking_checkout():
         "seat_ids": [10, 11, 12]
     }
     """
+
     user_id = get_jwt_identity()
     data = request.get_json()
     seat_ids = data.get('seat_ids')
@@ -175,7 +172,6 @@ def booking_checkout():
             db.session.add(seat)
 
         # Create Booking record with status 'pending'
-        # Assuming all seats belong to the same showtime (enforce this!)
         showtime_id = seats[0].showtime_id
         booking = Booking(
             user_id=user_id,
@@ -184,7 +180,7 @@ def booking_checkout():
             created_at=now
         )
         db.session.add(booking)
-        db.session.flush()  # flush to get booking.id
+        db.session.flush()
 
         # Link seats to booking
         for seat in seats:
@@ -194,7 +190,6 @@ def booking_checkout():
         # Stripe Setup
         stripe.api_key = current_app.config['STRIPE_SECRET_KEY']
 
-        # Create Stripe Checkout Session
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -209,12 +204,10 @@ def booking_checkout():
             }],
             mode='payment',
             success_url="https://aqaryaid.com/en",
-            cancel_url="https://www.facebook.com",
+            cancel_url="https://aqaryaid.com/en/contact",
         )
-        print(session)
 
-
-        # Create Payment record with status 'initiated'
+        # Create Payment record
         payment = Payment(
             booking_id=booking.id,
             amount=session.amount_total / 100,
@@ -223,41 +216,35 @@ def booking_checkout():
             timestamp=now
         )
         db.session.add(payment)
-
-        # Link payment to booking (optional if you want)
         booking.payment = payment
 
-        db.session.commit()  # commit booking, seats, and payment together
+        db.session.commit()
+
+        # WebSocket: Notify everyone about locked seats
+        for seat in seats:
+            socketio.emit('seat_locked', {
+                'seat_id': seat.id,
+                'row': seat.row,
+                'number': seat.number,
+                'showtime_id': seat.showtime_id,
+                'status': 'locked',
+                'locked_until': seat.locked_until.isoformat(),
+                'locked_by': user_id
+            }, broadcast=True)
+
         return jsonify({'checkout_url': session.url}), 200
 
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-
-
 @movie.route('/confirm_booking', methods=['POST'])
 def confirm_booking():
     """
-    Request JSON:
-    {
-  "id": "evt_1IhXj2Lx6qR9X",
-  "object": "event",
-  "type": "checkout.session.completed",
-  "data": {
-    "object": {
-      "id": "cs_test_a1b2c3d4e5f6g7h8i9j0",
-      "object": "checkout.session",
-      "payment_status": "paid",
-      "customer_email": "customer@example.com",
-      "metadata": {
-        "booking_id": "123"    // Optional, you can pass your own data here
-      },
-      // ... other session details
-    }
-  }
-}
+    Stripe webhook route triggered on checkout.session.completed.
+    This updates booking/payment status and notifies ONLY the buyer via WebSocket.
     """
+
     payload = request.data
     sig_header = request.headers.get('Stripe-Signature')
 
@@ -266,28 +253,39 @@ def confirm_booking():
             payload, sig_header, current_app.config['STRIPE_WEBHOOK_SECRET']
         )
     except ValueError as e:
-        return jsonify({'error': 'Invalid payload'}), 400
-
+        return jsonify({'error': f'Invalid payload: {e}'}), 400
     except stripe.error.SignatureVerificationError as e:
-        return jsonify({'error': 'Invalid signature'}), 400
+        return jsonify({'error': f'Invalid signature: {e}'}), 400
 
-    # Handle the event
     if event['type'] == 'checkout.session.completed':
         session = event['data']['object']
-
-        # You can get booking_id from session.metadata if you passed it
         booking_id = session['metadata'].get('booking_id')
 
-        # Here, update your Booking and Payment status in DB accordingly
-        # For example:
         booking = Booking.query.get(booking_id)
         if booking:
             booking.status = 'confirmed'
             if booking.payment:
                 booking.payment.status = 'success'
+
+            for seat in booking.seats:
+                seat.status = 'booked'
+                seat.locked_by = None
+                seat.locked_until = None
+
             db.session.commit()
 
-    # Return a 200 response to acknowledge receipt of the event
+            # Notify only the buyer
+            buyer_sid = user_socket_map.get(booking.user_id)
+            if buyer_sid:
+                for seat in booking.seats:
+                    socketio.emit('seat_booked', {
+                        'seat_id': seat.id,
+                        'row': seat.row,
+                        'number': seat.number,
+                        'showtime_id': seat.showtime_id,
+                        'status': 'booked'
+                    }, to=buyer_sid)
+
     return jsonify({'status': 'success'}), 200
 
 @movie.route('/unlock_seats', methods=['POST'])
@@ -298,11 +296,10 @@ def unlock_seats():
         "seat_ids": [10, 11, 12]
     }
     """
-    user_id = get_jwt_identity()
     data = request.get_json()
     seat_ids = data.get('seat_ids')
 
-    if not user_id or not seat_ids:
+    if not seat_ids:
         return jsonify({"error": "user_id and seat_ids are required"}), 400
 
     try:
@@ -310,7 +307,6 @@ def unlock_seats():
             Seat.query
             .filter(and_(
                 Seat.id.in_(seat_ids),
-                Seat.locked_by == user_id,
                 Seat.status == 'locked'
             ))
             .all()
@@ -320,6 +316,7 @@ def unlock_seats():
             seat.status = 'available'
             seat.locked_by = None
             seat.locked_until = None
+            seat.booking_id = None
             db.session.add(seat)
 
         db.session.commit()
