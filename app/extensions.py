@@ -12,7 +12,7 @@ user_socket_map = {}
 
 def decode_token(token):
     try:
-        payload = jwt.decode(token, current_app.config['SECRET_KEY'], algorithms=["HS256"])
+        payload = jwt.decode(token, current_app.config['JWT_SECRET_KEY'], algorithms=["HS256"])
         return payload
 
     except jwt.ExpiredSignatureError:

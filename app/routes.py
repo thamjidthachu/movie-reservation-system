@@ -230,7 +230,7 @@ def booking_checkout():
                 'status': 'locked',
                 'locked_until': seat.locked_until.isoformat(),
                 'locked_by': user_id
-            }, broadcast=True)
+            }, namespace='/', to=None)
 
         return jsonify({'checkout_url': session.url}), 200
 
