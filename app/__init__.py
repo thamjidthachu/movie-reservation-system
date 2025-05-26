@@ -1,6 +1,10 @@
 from flask import Flask
 from flask_jwt_extended import JWTManager
+
+from .auth import auth
 from .extensions import db, socketio, migrate
+from .routes import movie
+from .socket import socketio_events
 
 jwt = JWTManager()
 
@@ -10,22 +14,19 @@ def create_app():
 
     # Initialize extensions
     db.init_app(app)
-    jwt.init_app(app)
-    socketio.init_app(app, cors_allowed_origins="*")
     migrate.init_app(app, db)
+    jwt.init_app(app)
+    socketio.init_app(app)
 
     from flask_cors import CORS
     CORS(app)
 
     # Register blueprints
-    from .routes import movie
-    app.register_blueprint(movie)
-
-    from .auth import auth
     app.register_blueprint(auth, url_prefix='/auth')
 
+    app.register_blueprint(movie)
+
     # Register Socket.IO events
-    from .socket import socketio_events
-    socketio_events(socketio)  # Pass the instance to event handlers
+    socketio_events(socketio)
 
     return app

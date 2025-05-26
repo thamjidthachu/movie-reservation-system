@@ -1,0 +1,92 @@
+{
+  "adaptive_pricing": {
+    "enabled": true
+  },
+  "after_expiration": null,
+  "allow_promotion_codes": null,
+  "amount_subtotal": 3000,
+  "amount_total": 3000,
+  "automatic_tax": {
+    "enabled": false,
+    "liability": null,
+    "provider": null,
+    "status": null
+  },
+  "billing_address_collection": null,
+  "cancel_url": "https://www.facebook.com",
+  "client_reference_id": null,
+  "client_secret": null,
+  "collected_information": null,
+  "consent": null,
+  "consent_collection": null,
+  "created": 1748090506,
+  "currency": "aed",
+  "currency_conversion": null,
+  "custom_fields": [],
+  "custom_text": {
+    "after_submit": null,
+    "shipping_address": null,
+    "submit": null,
+    "terms_of_service_acceptance": null
+  },
+  "customer": null,
+  "customer_creation": "if_required",
+  "customer_details": null,
+  "customer_email": null,
+  "discounts": [],
+  "expires_at": 1748176906,
+  "id": "cs_test_a1qCYmV1JVsc1FsEDXOxyqvIOzUOfR4mYElYvGrCO1M9NMnPA7TE16Ydvb",
+  "invoice": null,
+  "invoice_creation": {
+    "enabled": false,
+    "invoice_data": {
+      "account_tax_ids": null,
+      "custom_fields": null,
+      "description": null,
+      "footer": null,
+      "issuer": null,
+      "metadata": {},
+      "rendering_options": null
+    }
+  },
+  "livemode": false,
+  "locale": null,
+  "metadata": {},
+  "mode": "payment",
+  "object": "checkout.session",
+  "payment_intent": null,
+  "payment_link": null,
+  "payment_method_collection": "if_required",
+  "payment_method_configuration_details": null,
+  "payment_method_options": {
+    "card": {
+      "request_three_d_secure": "automatic"
+    }
+  },
+  "payment_method_types": [
+    "card"
+  ],
+  "payment_status": "unpaid",
+  "permissions": null,
+  "phone_number_collection": {
+    "enabled": false
+  },
+  "recovered_from": null,
+  "saved_payment_method_options": null,
+  "setup_intent": null,
+  "shipping_address_collection": null,
+  "shipping_cost": null,
+  "shipping_options": [],
+  "status": "open",
+  "submit_type": null,
+  "subscription": null,
+  "success_url": "https://aqaryaid.com/en",
+  "total_details": {
+    "amount_discount": 0,
+    "amount_shipping": 0,
+    "amount_tax": 0
+  },
+  "ui_mode": "hosted",
+  "url": "https://checkout.stripe.com/c/pay/cs_test_a1qCYmV1JVsc1FsEDXOxyqvIOzUOfR4mYElYvGrCO1M9NMnPA7TE16Ydvb#fidkdWxOYHwnPyd1blpxYHZxWjA0V1ZBR2IxQXJ9TzJLc2x0T2ZhcTJVcF9wakA8cXBLa0FrU3AyQmIwdDZiY3BDS1dEUFV1YmNdTGswXV9mNFZMdWhtUUdqSHRhVkp8fXw8NH9TMjc2QFFkNTVScVRsNzI9bScpJ2N3amhWYHdzYHcnP3F3cGApJ2lkfGpwcVF8dWAnPyd2bGtiaWBabHFgaCcpJ2BrZGdpYFVpZGZgbWppYWB3dic%2FcXdwYHgl",
+  "wallet_options": null
+}

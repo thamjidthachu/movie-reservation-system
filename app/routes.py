@@ -5,10 +5,9 @@ from flask import Blueprint, jsonify, request
 from flask import current_app
 from flask_jwt_extended import get_jwt_identity, jwt_required
 from sqlalchemy import and_
-from sqlalchemy.exc import IntegrityError
 
-from .extensions import db
-from .models import Movie, Showtime, Seat, Booking
+from .extensions import db, socketio, user_socket_map
+from .models import Movie, Showtime, Seat, Booking, Payment
 
 movie = Blueprint('main', __name__)
 
@@ -74,7 +73,6 @@ def handle_movies():
 
     return None
 
-
 @movie.route('/movie/<int:movie_id>/show-times', methods=['GET'])
 def get_show_times(movie_id):
     movie = Movie.query.get_or_404(movie_id)
@@ -97,7 +95,6 @@ def get_show_times(movie_id):
         'title': movie.title,
         'show_times': data
     })
-
 
 @movie.route('/showtime/<int:showtime_id>/seats', methods=['GET'])
 def get_seating_map(showtime_id):
@@ -128,7 +125,6 @@ def get_seating_map(showtime_id):
         'seating_map': seat_map
     })
 
-
 @movie.route('/checkout', methods=['POST'])
 @jwt_required()
 def booking_checkout():
@@ -138,6 +134,7 @@ def booking_checkout():
         "seat_ids": [10, 11, 12]
     }
     """
+
     user_id = get_jwt_identity()
     data = request.get_json()
     seat_ids = data.get('seat_ids')
@@ -157,9 +154,13 @@ def booking_checkout():
             .all()
         )
 
+        if not seats or len(seats) != len(seat_ids):
+            return jsonify({"error": "One or more seats not found"}), 404
+
         for seat in seats:
             if seat.status == 'booked':
                 return jsonify({"error": f"Seat {seat.id} already booked"}), 409
+
             if seat.status == 'locked' and seat.locked_until and seat.locked_until > now and seat.locked_by != user_id:
                 return jsonify({"error": f"Seat {seat.id} is currently locked by another user"}), 409
 
@@ -170,10 +171,25 @@ def booking_checkout():
             seat.locked_until = lock_until
             db.session.add(seat)
 
+        # Create Booking record with status 'pending'
+        showtime_id = seats[0].showtime_id
+        booking = Booking(
+            user_id=user_id,
+            showtime_id=showtime_id,
+            status='pending',
+            created_at=now
+        )
+        db.session.add(booking)
+        db.session.flush()
+
+        # Link seats to booking
+        for seat in seats:
+            seat.booking_id = booking.id
+            db.session.add(seat)
+
         # Stripe Setup
         stripe.api_key = current_app.config['STRIPE_SECRET_KEY']
 
-        # Create Stripe Checkout Session
         session = stripe.checkout.Session.create(
             payment_method_types=['card'],
             line_items=[{
@@ -188,10 +204,33 @@ def booking_checkout():
             }],
             mode='payment',
             success_url="https://aqaryaid.com/en",
-            cancel_url = "https://www.facebook.com",
+            cancel_url="https://aqaryaid.com/en/contact",
         )
 
+        # Create Payment record
+        payment = Payment(
+            booking_id=booking.id,
+            amount=session.amount_total / 100,
+            checkout_id=session.id,
+            status='initiated',
+            timestamp=now
+        )
+        db.session.add(payment)
+        booking.payment = payment
+
         db.session.commit()
+
+        # WebSocket: Notify everyone about locked seats
+        for seat in seats:
+            socketio.emit('seat_locked', {
+                'seat_id': seat.id,
+                'row': seat.row,
+                'number': seat.number,
+                'showtime_id': seat.showtime_id,
+                'status': 'locked',
+                'locked_until': seat.locked_until.isoformat(),
+                'locked_by': user_id
+            }, broadcast=True)
 
         return jsonify({'checkout_url': session.url}), 200
 
@@ -199,87 +238,55 @@ def booking_checkout():
         db.session.rollback()
         return jsonify({"error": str(e)}), 500
 
-
 @movie.route('/confirm_booking', methods=['POST'])
 def confirm_booking():
     """
-    Request JSON:
-    {
-        "seat_ids": [10, 11, 12],
-        "showtime_id": 5,
-        "payment_method_id": "pm_xxx"
-    }
+    Stripe webhook route triggered on checkout.session.completed.
+    This updates booking/payment status and notifies ONLY the buyer via WebSocket.
     """
-    user_id = get_jwt_identity()
-    data = request.get_json()
-    seat_ids = data.get('seat_ids')
-    showtime_id = data.get('showtime_id')
-    payment_method_id = data.get('payment_method_id')
 
-    if not user_id or not seat_ids or not showtime_id or not payment_method_id:
-        return jsonify({"error": "user_id, seat_ids, showtime_id, and payment_method_id are required"}), 400
-
-    now = datetime.utcnow()
+    payload = request.data
+    sig_header = request.headers.get('Stripe-Signature')
 
     try:
-        seats = (
-            Seat.query
-            .filter(Seat.id.in_(seat_ids))
-            .with_for_update()
-            .all()
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, current_app.config['STRIPE_WEBHOOK_SECRET']
         )
+    except ValueError as e:
+        return jsonify({'error': f'Invalid payload: {e}'}), 400
+    except stripe.error.SignatureVerificationError as e:
+        return jsonify({'error': f'Invalid signature: {e}'}), 400
 
-        for seat in seats:
-            if seat.status != 'locked' or seat.locked_by != user_id or not seat.locked_until or seat.locked_until < now:
-                return jsonify({"error": f"Seat {seat.id} is not locked by user or lock expired"}), 409
+    if event['type'] == 'checkout.session.completed':
+        session = event['data']['object']
+        booking_id = session['metadata'].get('booking_id')
 
-        # Calculate total amount
-        seat_price = current_app.config['SEAT_PRICE']
-        amount = len(seat_ids) * seat_price
-        currency = current_app.config['CURRENCY']
-        stripe.api_key = current_app.config['STRIPE_SECRET_KEY']
+        booking = Booking.query.get(booking_id)
+        if booking:
+            booking.status = 'confirmed'
+            if booking.payment:
+                booking.payment.status = 'success'
 
-        # Create a payment intent
-        intent = stripe.PaymentIntent.create(
-            amount=amount,
-            currency=currency,
-            payment_method=payment_method_id,
-            confirmation_method='manual',
-            confirm=True,
-        )
+            for seat in booking.seats:
+                seat.status = 'booked'
+                seat.locked_by = None
+                seat.locked_until = None
 
-        if intent['status'] != 'succeeded':
-            return jsonify({"error": "Payment failed", "stripe_status": intent['status']}), 402
+            db.session.commit()
 
-        # Payment succeeded → Confirm bookings
-        for seat in seats:
-            booking = Booking(
-                user_id=user_id,
-                seat_id=seat.id,
-                showtime_id=showtime_id,
-                status='confirmed',
-                created_at=now
-            )
-            db.session.add(booking)
+            # Notify only the buyer
+            buyer_sid = user_socket_map.get(booking.user_id)
+            if buyer_sid:
+                for seat in booking.seats:
+                    socketio.emit('seat_booked', {
+                        'seat_id': seat.id,
+                        'row': seat.row,
+                        'number': seat.number,
+                        'showtime_id': seat.showtime_id,
+                        'status': 'booked'
+                    }, to=buyer_sid)
 
-            seat.status = 'booked'
-            seat.locked_by = None
-            seat.locked_until = None
-            db.session.add(seat)
-
-        db.session.commit()
-        return jsonify({"message": "Booking confirmed and payment successful!"}), 200
-
-    except stripe.error.CardError as e:
-        return jsonify({"error": e.user_message}), 402
-
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({"error": "Double booking detected, please try again"}), 409
-
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({"error": str(e)}), 500
+    return jsonify({'status': 'success'}), 200
 
 @movie.route('/unlock_seats', methods=['POST'])
 def unlock_seats():
@@ -289,11 +296,10 @@ def unlock_seats():
         "seat_ids": [10, 11, 12]
     }
     """
-    user_id = get_jwt_identity()
     data = request.get_json()
     seat_ids = data.get('seat_ids')
 
-    if not user_id or not seat_ids:
+    if not seat_ids:
         return jsonify({"error": "user_id and seat_ids are required"}), 400
 
     try:
@@ -301,7 +307,6 @@ def unlock_seats():
             Seat.query
             .filter(and_(
                 Seat.id.in_(seat_ids),
-                Seat.locked_by == user_id,
                 Seat.status == 'locked'
             ))
             .all()
@@ -311,6 +316,7 @@ def unlock_seats():
             seat.status = 'available'
             seat.locked_by = None
             seat.locked_until = None
+            seat.booking_id = None
             db.session.add(seat)
 
         db.session.commit()
