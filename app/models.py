@@ -71,7 +71,7 @@ class Booking(db.Model):
     seats = db.relationship('Seat', backref='booking', lazy=True)
 
     __table_args__ = (
-        db.UniqueConstraint('showtime_id', 'user_id', name='unique_booking_per_user_per_showtime'),
+        db.UniqueConstraint('showtime_id', 'user_id', 'created_at', name='unique_booking_per_user_per_showtime'),
     )
 
 

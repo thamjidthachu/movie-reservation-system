@@ -36,8 +36,6 @@ for src, dst, rel, *note in relationships:
     dot.edge(src, dst, label=label)
 
 # Render the diagram
-output_path = "/mnt/data/fixed_movie_booking_er_diagram"
+output_path = "data/movie_booking_er_diagram"
 dot.render(output_path, format='png', cleanup=False)
-output_path += ".png"  # Append the file extension for display
-
-output_path
+print(output_path)
