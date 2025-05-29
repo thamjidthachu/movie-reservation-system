@@ -3,6 +3,7 @@ version: '3.8'
 services:
   app:
     build: .
+    restart: on-failure
     ports:
       - "5000:5000"
     env_file:
@@ -10,16 +11,27 @@ services:
     depends_on:
       - db
       - redis
+    networks:
+      - movie-reservation
 
   db:
     image: postgres:13
+    restart: on-failure
     env_file:
      - .env-db
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - movie-reservation
 
   redis:
     image: redis:alpine
+    restart: on-failure
+    networks:
+      - movie-reservation
 
 volumes:
   postgres_data:
+
+networks:
+  movie-reservation:

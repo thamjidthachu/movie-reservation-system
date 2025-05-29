@@ -1,5 +1,4 @@
 import requests
-from redis.commands.search.reducers import count
 
 LOGIN_URL = "http://127.0.0.1:5000/auth/login"
 CHECKOUT_URL = "http://127.0.0.1:5000/checkout"

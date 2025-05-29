@@ -161,7 +161,7 @@ def booking_checkout():
             if seat.status == 'booked':
                 return jsonify({"error": f"Seat {seat.id} already booked"}), 409
 
-            if seat.status == 'locked' and seat.locked_until and seat.locked_until > now and seat.locked_by != user_id:
+            if seat.status == 'locked' and seat.locked_until and seat.locked_until > now and seat.locked_by != int(user_id):
                 return jsonify({"error": f"Seat {seat.id} is currently locked by another user"}), 409
 
         # Lock the seats
@@ -250,10 +250,11 @@ def confirm_booking():
 
     try:
         event = stripe.Webhook.construct_event(
-            payload, sig_header, current_app.config['STRIPE_WEBHOOK_SECRET']
+            payload, sig_header, current_app.config['STRIPE_SECRET_KEY']
         )
     except ValueError as e:
         return jsonify({'error': f'Invalid payload: {e}'}), 400
+
     except stripe.error.SignatureVerificationError as e:
         return jsonify({'error': f'Invalid signature: {e}'}), 400
 
